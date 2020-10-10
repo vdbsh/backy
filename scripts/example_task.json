@@ -1,0 +1,34 @@
+{
+	"destination": "~/Backup",
+	"archiving_cycle": "monthly",
+	"remove_failed_archives": true,
+	"multiprocessing": true,
+	"verbose_log": false,
+	
+	"directories_to_sync": [
+		"~/Desktop",
+		"~/Documents"
+	],
+	
+	"directories_to_archive": [
+		"~/Desktop",
+		"~/Documents"
+	],
+
+	"exclude": [
+		".*",
+		"$RECYCLE.BIN",
+		"$Recycle.Bin",
+		"Desktop DB",
+		"Desktop DF",
+		"hiberfil.sys",
+		"lost+found",
+		"Network Trash Folder",
+		"pagefile.sys",
+		"Recycled",
+		"RECYCLER",
+		"System Volume Information",
+		"Temporary Items",
+		"Thumbs.db"
+	]
+}
