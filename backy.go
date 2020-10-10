@@ -226,8 +226,7 @@ func tar(archive_dirs []string, dest string, mode string, args []string, archivi
 }
 
 func main() {
-	var status int
-	status = 0
+	var status int = 0
 	log.SetOutput(os.Stdout)
 	log.Println("🍀", "backy", version)
 
