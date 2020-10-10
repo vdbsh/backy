@@ -244,7 +244,7 @@ func main() {
 		} else {
 			if rsync(task.DirectoriesToSync, task.Destination, append([]string{"-avW", "--delete", "--delete-excluded"}, task.Exclude...), task.Multiprocessing, task.VerboseLog) != nil {
 				status = 3
-				log.Println("❗️", "Synchronisation completed with errors")
+				log.Println("❗️", "Synchronization completed with errors")
 			}
 
 			if tar(task.DirectoriesToArchive, task.Destination, "-jcvf", task.Exclude, task.ArchivingCycle, task.Multiprocessing, task.VerboseLog, task.RemoveFailedArchives) != nil {

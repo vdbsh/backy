@@ -1,7 +1,7 @@
 # 📦 backy: tiny multiprocessing utility for file backups
 
 ## Features
-* Directories synchronisation 
+* Directories synchronization 
 * Full directories archiving: hourly, daily, weekly, monthly or yearly with auto re-archivation if archive lost or corrupted
 * Using native rsync(rsync over SSH supported) and tar(+bzip2) tools from your OS
 * No third-party dependencies
@@ -57,12 +57,12 @@ See ```scripts```
 **For a complex backup schemes it is highly recommended to split tasks to separate configuration files and time periods. Another tip is to chain your backup actions by backy exit codes.**
 
 ## Exit Codes
-* 0 - Synchronisation and archiving completed successfully
+* 0 - Synchronization and archiving completed successfully
 * 1 - No task configuration provided
 * 2 - Can't read provided task configuration
-* 3 - Synchronisation completed with errors
+* 3 - Synchronization completed with errors
 * 4 - Archiving completed with errors
-* 5 - Synchronisation and archiving completed with errors
+* 5 - Synchronization and archiving completed with errors
 
 ## Building
 ```go build backy.go```
