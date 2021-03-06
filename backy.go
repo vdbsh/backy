@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const version string = "1.0"
+const version string = "1.1"
 
 type Task struct {
 	VerboseLog           bool     `json:"verbose_log"`
@@ -172,20 +172,6 @@ func rsync(src_dirs []string, dest string, args []string, multiprocessing bool, 
 	return rsync_err
 }
 
-func checkArchives(archives []string, archiving_cycle string, multiprocessing bool) (archives_errors []error) {
-	if len(archives) > 0 {
-		var task_args [][]string
-
-		for _, archive := range archives {
-			task_args = append(task_args, []string{"-t", archive})
-		}
-
-		log.Println("🔎", "Checking", archiving_cycle, "archives:", archives)
-		archives_errors = executeProcesses("bzip2", task_args, multiprocessing, "🗃", false)
-	}
-	return archives_errors
-}
-
 func tar(archive_dirs []string, dest string, mode string, args []string, archiving_cycle string, multiprocessing bool, print_outtput bool, remove_failed_archives bool) (tar_err error) {
 	var archives []string
 	var dirs_to_archive []string
@@ -196,9 +182,14 @@ func tar(archive_dirs []string, dest string, mode string, args []string, archivi
 		archives = append(archives, path.Join(dest, file_path))
 	}
 
-	for i, archive := range checkArchives(archives, archiving_cycle, multiprocessing) {
-		if archive != nil {
-			task_args = append(task_args, append([]string{mode, archives[i]}, append(args, archive_dirs[i])...))
+	for i, archive := range archives {
+		in_progress_archive := archive + ".part"
+
+		if _, err := os.Stat(archive); err != nil {
+			if _, err := os.Stat(in_progress_archive); err == nil {
+				os.Remove(in_progress_archive)
+			}
+			task_args = append(task_args, append([]string{mode, in_progress_archive}, append(args, archive_dirs[i])...))
 			dirs_to_archive = append(dirs_to_archive, archive_dirs[i])
 		}
 	}
@@ -213,13 +204,17 @@ func tar(archive_dirs []string, dest string, mode string, args []string, archivi
 	results := executeProcesses("tar", task_args, multiprocessing, "📦", print_outtput)
 
 	for i, status := range results {
+		completed_archive := path.Join(dest, generateArchiveFilePath(dirs_to_archive[i], archiving_cycle))
+
 		if status != nil {
 			log.Println("💢", "Archiving failed for:", dirs_to_archive[i])
 			if remove_failed_archives == true {
 				log.Println("🧹", "Removing failed archive")
-				os.Remove(path.Join(dest, generateArchiveFilePath(dirs_to_archive[i], archiving_cycle)))
+				os.Remove(completed_archive + ".part")
 			}
 			tar_err = errors.New("tar failed")
+		} else {
+			os.Rename(completed_archive+".part", completed_archive)
 		}
 	}
 	return tar_err
