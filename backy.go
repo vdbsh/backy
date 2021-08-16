@@ -13,12 +13,11 @@ import (
 	"time"
 )
 
-const version string = "1.1"
+const version string = "1.2"
 
 type Task struct {
 	VerboseLog           bool     `json:"verbose_log"`
 	Multiprocessing      bool     `json:"multiprocessing"`
-	RemoveFailedArchives bool     `json:"remove_failed_archives"`
 	Destination          string   `json:"destination"`
 	ArchivingCycle       string   `json:"archiving_cycle"`
 	Exclude              []string `json:"exclude"`
@@ -42,18 +41,27 @@ func removeDuplicates(elements []string) (unique_elements []string) {
 func normilizePaths(paths []string) (normalized_paths []string) {
 	homedir, _ := os.UserHomeDir()
 
-	for i, path := range paths {
-		if string(path[0]) == "~" {
-			path = strings.Replace(path, "~", homedir, 1)
+	for i, p := range paths {
+		if string(p[0]) == "~" {
+			p = strings.Replace(p, "~", homedir, 1)
 		}
-		paths[i] = strings.TrimRight(string(path), "/")
+		paths[i] = strings.TrimRight(string(p), "/")
 	}
 	return paths
 }
 
+func getBasePath(path string) (base_path string) {
+	hostname, err := os.Hostname()
+
+	if err != nil {
+		hostname = "local"
+	}
+	return strings.Replace(hostname+path, "/", "_", -1)
+}
+
 func formatExcludeArgs(exclude_args_list []string) (exclude_args []string) {
-	for _, el := range exclude_args_list {
-		exclude_args = append(exclude_args, "--exclude="+el)
+	for _, i := range exclude_args_list {
+		exclude_args = append(exclude_args, "--exclude="+i)
 	}
 	return exclude_args
 }
@@ -63,13 +71,7 @@ func generateArchiveFilePath(path string, archiving_cycle string) (file_path str
 
 	dt := time.Now()
 	_, iso_week := dt.ISOWeek()
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "local"
-	}
-
-	base_path := strings.Replace(hostname+path, "/", "_", -1)
+	base_path := getBasePath(path)
 
 	switch archiving_cycle {
 	case "hourly":
@@ -113,57 +115,75 @@ func getTaskFromJson(file_path string) (config_err error, task_config Task) {
 	return config_err, task_config
 }
 
-func executeProcesses(c string, args [][]string, multiprocessing bool, progress_indicator string, print_outtput bool) (statuses []error) {
-	var processes []*exec.Cmd
-	progress_indicator_step := " " + progress_indicator
-
-	for _, arg_set := range args {
-		cmd := exec.Command(c, arg_set...)
-		if print_outtput == true {
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-		}
-
-		if multiprocessing == true {
-			processes = append(processes, cmd)
-			cmd.Start()
-		} else {
-			log.Println(progress_indicator)
-			statuses = append(statuses, cmd.Run())
-			progress_indicator += progress_indicator_step
+func filterArchiveDirs(archive_dirs []string, archiving_cycle string, dest string) (filtered_archive_dirs []string) {
+	for _, i := range archive_dirs {
+		_, e := os.Stat(path.Join(dest, generateArchiveFilePath(i, archiving_cycle)))
+		if os.IsNotExist(e) {
+			filtered_archive_dirs = append(filtered_archive_dirs, i)
 		}
 	}
-
-	if multiprocessing == true {
-		for _, process := range processes {
-			log.Println(progress_indicator)
-			statuses = append(statuses, process.Wait())
-			if print_outtput == true {
-				log.Println()
-			}
-			progress_indicator += progress_indicator_step
-		}
-	}
-	return statuses
+	return filtered_archive_dirs
 }
 
-func rsync(src_dirs []string, dest string, args []string, multiprocessing bool, print_outtput bool) (rsync_err error) {
-	if len(src_dirs) > 0 {
-		var task_args [][]string
+func logProgress(amount int, indicator string) {
+	progress_indicator_step := " " + indicator
+	for i := 1; i < amount; i++ {
+		indicator += progress_indicator_step
+	}
+	log.Println(indicator)
+}
 
+func checkStatus(status error, process string, element string) (status_err error) {
+	if status != nil {
+		log.Println("💢", process, "failed for:", element)
+		status_err = errors.New("process failed")
+	}
+	return status_err
+}
+
+func setProcessOutput(process *exec.Cmd, print_outtput bool) {
+	if print_outtput == true {
+		process.Stdout = os.Stdout
+		process.Stderr = os.Stderr
+	}
+}
+
+func runProcess(c string, args []string, print_outtput bool) (status error) {
+	cmd := exec.Command(c, args...)
+	setProcessOutput(cmd, print_outtput)
+	return cmd.Run()
+}
+
+func startProcess(c string, args []string, print_outtput bool) (handle *exec.Cmd) {
+	cmd := exec.Command(c, args...)
+	setProcessOutput(cmd, print_outtput)
+	cmd.Start()
+	return cmd
+}
+
+func startRsync(src_dirs []string, dest string, args []string, multiprocessing bool, print_outtput bool) (rsync_err error) {
+	var processes []*exec.Cmd
+
+	if len(src_dirs) > 0 {
 		log.Println("📤", "Syncing from:", src_dirs)
 		log.Println("📥", "To:", dest, "...")
 
-		for _, dir := range src_dirs {
-			task_args = append(task_args, append(args, []string{dir, dest}...))
+		for p, i := range src_dirs {
+			if multiprocessing == true {
+				processes = append(processes, startProcess("rsync", append(args, []string{i, dest}...), print_outtput))
+			} else {
+				logProgress(p+1, "🗂")
+				if checkStatus(runProcess("rsync", append(args, []string{i, dest}...), print_outtput), "Syncronization", i) != nil {
+					rsync_err = errors.New("rsync failed")
+				}
+			}
 		}
-
-		results := executeProcesses("rsync", task_args, multiprocessing, "🗂", print_outtput)
-
-		for i, status := range results {
-			if status != nil {
-				log.Println("💢", "Syncronisation failed for:", src_dirs[i])
-				rsync_err = errors.New("rsync failed")
+		if multiprocessing == true {
+			for i, p := range processes {
+				logProgress(i+1, "🗂")
+				if checkStatus(p.Wait(), "Syncronization", src_dirs[i]) != nil {
+					rsync_err = errors.New("rsync failed")
+				}
 			}
 		}
 	} else {
@@ -172,50 +192,53 @@ func rsync(src_dirs []string, dest string, args []string, multiprocessing bool, 
 	return rsync_err
 }
 
-func tar(archive_dirs []string, dest string, mode string, args []string, archiving_cycle string, multiprocessing bool, print_outtput bool, remove_failed_archives bool) (tar_err error) {
-	var archives []string
-	var dirs_to_archive []string
-	var task_args [][]string
+func startTar(archive_dirs []string, dest string, mode string, args []string, archiving_cycle string, multiprocessing bool, print_outtput bool) (tar_err error) {
+	var processes []*exec.Cmd
 
-	for _, dir := range archive_dirs {
-		file_path := generateArchiveFilePath(dir, archiving_cycle)
-		archives = append(archives, path.Join(dest, file_path))
-	}
-
-	for i, archive := range archives {
-		in_progress_archive := archive + ".part"
-
-		if _, err := os.Stat(archive); err != nil {
-			if _, err := os.Stat(in_progress_archive); err == nil {
-				os.Remove(in_progress_archive)
-			}
-			task_args = append(task_args, append([]string{mode, in_progress_archive}, append(args, archive_dirs[i])...))
-			dirs_to_archive = append(dirs_to_archive, archive_dirs[i])
-		}
-	}
-
+	dirs_to_archive := filterArchiveDirs(archive_dirs, archiving_cycle, dest)
 	if len(dirs_to_archive) > 0 {
 		log.Println("📤", "Archiving:", dirs_to_archive)
 		log.Println("📥", "To:", dest, "...")
+
+		for p, i := range dirs_to_archive {
+			completed_archive := path.Join(dest, generateArchiveFilePath(i, archiving_cycle))
+			in_progress_archive := completed_archive + ".part"
+			task_args := append([]string{mode, in_progress_archive}, append(args, i)...)
+
+			_, e := os.Stat(in_progress_archive)
+			if !os.IsNotExist(e) {
+				os.Remove(in_progress_archive)
+			}
+
+			if multiprocessing == true {
+				processes = append(processes, startProcess("tar", task_args, print_outtput))
+			} else {
+				logProgress(p+1, "📦")
+				if checkStatus(runProcess("tar", task_args, print_outtput), "Archiving", i) != nil {
+					os.Remove(in_progress_archive)
+					tar_err = errors.New("tar failed")
+				} else {
+					os.Rename(in_progress_archive, completed_archive)
+				}
+			}
+		}
+
+		if multiprocessing == true {
+			for i, p := range processes {
+				completed_archive := path.Join(dest, generateArchiveFilePath(dirs_to_archive[i], archiving_cycle))
+				in_progress_archive := completed_archive + ".part"
+				logProgress(i+1, "📦")
+				if checkStatus(p.Wait(), "Archiving", dirs_to_archive[i]) != nil {
+					os.Remove(in_progress_archive)
+					tar_err = errors.New("tar failed")
+				} else {
+					os.Rename(in_progress_archive, completed_archive)
+				}
+			}
+		}
+
 	} else {
 		log.Println("💤", "Nothing to archive")
-	}
-
-	results := executeProcesses("tar", task_args, multiprocessing, "📦", print_outtput)
-
-	for i, status := range results {
-		completed_archive := path.Join(dest, generateArchiveFilePath(dirs_to_archive[i], archiving_cycle))
-
-		if status != nil {
-			log.Println("💢", "Archiving failed for:", dirs_to_archive[i])
-			if remove_failed_archives == true {
-				log.Println("🧹", "Removing failed archive")
-				os.Remove(completed_archive + ".part")
-			}
-			tar_err = errors.New("tar failed")
-		} else {
-			os.Rename(completed_archive+".part", completed_archive)
-		}
 	}
 	return tar_err
 }
@@ -237,12 +260,12 @@ func main() {
 			status = 2
 
 		} else {
-			if rsync(task.DirectoriesToSync, task.Destination, append([]string{"-avW", "--delete", "--delete-excluded"}, task.Exclude...), task.Multiprocessing, task.VerboseLog) != nil {
+			if startRsync(task.DirectoriesToSync, task.Destination, append([]string{"-avW", "--delete", "--delete-excluded"}, task.Exclude...), task.Multiprocessing, task.VerboseLog) != nil {
 				status = 3
 				log.Println("❗️", "Synchronization completed with errors")
 			}
 
-			if tar(task.DirectoriesToArchive, task.Destination, "-jcvf", task.Exclude, task.ArchivingCycle, task.Multiprocessing, task.VerboseLog, task.RemoveFailedArchives) != nil {
+			if startTar(task.DirectoriesToArchive, task.Destination, "-jcvf", task.Exclude, task.ArchivingCycle, task.Multiprocessing, task.VerboseLog) != nil {
 				if status != 3 {
 					status = 4
 				} else {

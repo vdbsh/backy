@@ -15,7 +15,6 @@
 {
 	"destination": "~/Backup",
 	"archiving_cycle": "monthly",
-	"remove_failed_archives": true,
 	"multiprocessing": true,
 	"verbose_log": false,
 	
