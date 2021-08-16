@@ -11,7 +11,7 @@
 ```backy <task.json>```
 
 ## Task Configuration Format
-```
+```json
 {
 	"destination": "~/Backup",
 	"archiving_cycle": "monthly",
